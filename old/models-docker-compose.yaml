@@ -1,0 +1,54 @@
+services:
+  llm-brain:
+    build:
+      context: .
+      dockerfile: Dockerfile.vllm
+    container_name: vllm-qwen32b-brain
+    runtime: nvidia
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - HF_ENDPOINT=${HF_ENDPOINT:-https://huggingface.co}
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./model_cache:/root/.cache/huggingface
+    shm_size: "16gb"
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - python3 -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health').read()"
+      interval: 30s
+      timeout: 10s
+      retries: 12
+      start_period: 120s
+    command: >
+      python3 -m vllm.entrypoints.openai.api_server
+      --model Qwen/Qwen3-32B-NVFP4
+      --quantization nvfp4
+      --max-model-len 32768
+      --max-num-seqs 1
+      --tensor-parallel-size 1
+      --gpu-memory-utilization 0.6
+      --trust-remote-code
+      --port 8000
+    restart: unless-stopped
+
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:v0.7.2
+    container_name: open-webui
+    depends_on:
+      llm-brain:
+        condition: service_healthy
+    ports:
+      - "3000:8080"
+    volumes:
+      - open-webui-data:/app/backend/data
+    environment:
+      - OPENAI_API_BASE_URLS=http://llm-brain:8000/v1
+      - OPENAI_API_KEYS=sk-dgx-dummy-key
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: always
+
+volumes:
+  open-webui-data:

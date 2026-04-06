@@ -1,0 +1,7 @@
+# 同样使用最新的基础镜像
+FROM nvcr.io/nvidia/pytorch:25.08-py3
+
+RUN pip install --no-cache-dir --upgrade pip
+RUN pip install --no-cache-dir infinity-emb[all]
+
+ENV PYTHONUNBUFFERED=1

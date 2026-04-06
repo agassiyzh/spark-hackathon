@@ -1,0 +1,159 @@
+services:
+  llm-brain:
+    image: vllm/vllm-openai:gemma4-cu130
+    container_name: llm-brain
+    restart: unless-stopped
+    ports:
+      - "${VLLM_PORT}:8000"
+    environment:
+      HF_ENDPOINT: ${HF_ENDPOINT}
+        #HTTP_PROXY: ${PROXY_URL}
+        #HTTPS_PROXY: ${PROXY_URL}
+      ALL_PROXY: ${PROXY_URL}
+      NO_PROXY: ${NO_PROXY}
+    volumes:
+      - ${HF_HOME}:/root/.cache/huggingface
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - python3 -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health').read()"
+      interval: 30s
+      timeout: 10s
+      retries: 20
+      start_period: 180s
+    command:
+      - ${HF_MODEL_HANDLE}
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+      - --max-model-len
+      - ${MAX_MODEL_LEN}
+      - --max-num-seqs
+      - ${MAX_NUM_SEQS}
+      - --tensor-parallel-size
+      - ${TENSOR_PARALLEL_SIZE}
+      - --gpu-memory-utilization
+      - ${GPU_MEMORY_UTILIZATION}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  assistant-orchestrator:
+    build:
+      context: .
+      dockerfile: Dockerfile.orchestrator
+    container_name: assistant-orchestrator
+    restart: unless-stopped
+    depends_on:
+      llm-brain:
+        condition: service_healthy
+    ports:
+      - "${ORCH_PORT}:8081"
+    environment:
+      ORCH_HOST: 0.0.0.0
+      ORCH_PORT: 8081
+      ORCH_DATA_DIR: /data
+      HA_BASE_URL: ${HA_BASE_URL}
+      HA_TOKEN: ${HA_TOKEN}
+      LLM_BASE_URL: http://llm-brain:8000/v1
+      LLM_MODEL: ${HF_MODEL_HANDLE}
+      LLM_API_KEY: ${LLM_API_KEY}
+      AUTO_EXECUTE_ENTITIES: ${AUTO_EXECUTE_ENTITIES}
+    volumes:
+      - ${ORCH_DATA_DIR}:/data
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - python3 -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8081/health').read()"
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 10s
+
+  embedding:
+    profiles: ["rag"]
+    build:
+      context: .
+      dockerfile: Dockerfile.infinity
+    container_name: embedding
+    restart: unless-stopped
+    ports:
+      - "${EMBEDDING_PORT}:${EMBEDDING_PORT}"
+    command:
+      - infinity_emb
+      - v2
+      - --model-id
+      - ${EMBEDDING_MODEL_ID}
+      - --port
+      - ${EMBEDDING_PORT}
+    environment:
+      HF_HOME: /app/.cache
+      HF_ENDPOINT: ${HF_ENDPOINT}
+        #HTTP_PROXY: ${PROXY_URL}
+        #HTTPS_PROXY: ${PROXY_URL}
+      ALL_PROXY: ${PROXY_URL}
+      NO_PROXY: ${NO_PROXY}
+    volumes:
+      - ${INFINITY_CACHE_DIR}:/app/.cache
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  reranker:
+    profiles: ["rag"]
+    build:
+      context: .
+      dockerfile: Dockerfile.infinity
+    container_name: reranker
+    restart: unless-stopped
+    ports:
+      - "${RERANKER_PORT}:${RERANKER_PORT}"
+    command:
+      - infinity_emb
+      - v2
+      - --model-id
+      - ${RERANKER_MODEL_ID}
+      - --port
+      - ${RERANKER_PORT}
+    environment:
+      HF_HOME: /app/.cache
+      HF_ENDPOINT: ${HF_ENDPOINT}
+      HTTP_PROXY: ${PROXY_URL}
+      HTTPS_PROXY: ${PROXY_URL}
+      ALL_PROXY: ${PROXY_URL}
+      NO_PROXY: ${NO_PROXY}
+    volumes:
+      - ${INFINITY_CACHE_DIR}:/app/.cache
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:main
+    container_name: open-webui
+    restart: unless-stopped
+    depends_on:
+      llm-brain:
+        condition: service_healthy
+    ports:
+      - "${OPEN_WEBUI_PORT}:8080"
+    environment:
+      OPENAI_API_BASE_URLS: http://llm-brain:8000/v1
+      OPENAI_API_KEYS: sk-local-dummy-key
+    volumes:
+      - ${OPEN_WEBUI_DATA_DIR}:/app/backend/data

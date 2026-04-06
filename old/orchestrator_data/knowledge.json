@@ -1,0 +1,10 @@
+[
+  {
+    "title": "Lighting automation policy",
+    "content": "Only whitelisted lighting entities may auto-execute without confirmation in phase one."
+  },
+  {
+    "title": "Assistant safety policy",
+    "content": "Non-lighting control requests require user confirmation before Home Assistant service calls are executed."
+  }
+]

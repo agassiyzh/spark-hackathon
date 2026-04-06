@@ -1,0 +1,16 @@
+services:
+
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:main
+    container_name: open-webui
+    restart: unless-stopped
+    depends_on:
+      llm-brain:
+        condition: service_healthy
+    ports:
+      - "${OPEN_WEBUI_PORT}:8080"
+    environment:
+      OPENAI_API_BASE_URLS: http://llm-brain:8000/v1
+      OPENAI_API_KEYS: sk-local-dummy-key
+    volumes:
+      - ${OPEN_WEBUI_DATA_DIR}:/app/backend/data
