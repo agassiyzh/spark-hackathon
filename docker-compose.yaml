@@ -1,16 +1,71 @@
 services:
+  trtllm-server:
+    image: nvcr.io/nvidia/tensorrt-llm/release:1.3.0rc10
+    container_name: trtllm_llm_server
+    restart: unless-stopped
+    # 启用主机网络和 IPC 以最大化性能并减少节点通信开销
+    ipc: host
+    network_mode: host
+    # 显卡资源分配
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    # 解除系统资源限制 (防 OOM 保护)
+    ulimits:
+      memlock: -1
+      stack: 67108864
+    env_file:
+      - .env
+    environment:
+      # 为了在 shell 脚本中引用，这里依然把变量传递进容器
+      # - HF_TOKEN=${HF_TOKEN}
+      - MODEL_HANDLE=${MODEL_HANDLE}
+      - HTTP_PROXY=http://192.168.1.8:7890
+      - HTTPS_PROXY=http://192.168.1.8:7890
+    volumes:
+      # 映射本地缓存，防止每次重启容器都重新下载动辄几十GB的模型权重
+      #- ~/.cache/huggingface/:/root/.cache/huggingface/
+      - ${LOCAL_MODEL_PATH}:/model
+    # 将教程中的组合命令转化为标准的多行启动命令
+    command:
+      - bash
+      - -c
+      - |
+        # 1. 写入针对 Blackwell 优化的配置
+        cat > /tmp/extra-config.yml <<EOF
+        print_iter_log: false
+        kv_cache_config:
+          dtype: "auto"
+          # Blackwell 拥有 128GB 显存，可以留出 90% 给 KV Cache 以支持超长上下文
+          free_gpu_memory_fraction: 0.9
+        cuda_graph_config:
+          enable_padding: true
+        # 启用 FP8 相关的底层优化
+        disable_overlap_scheduler: true
+        EOF
+
+        # 2. 启动服务，直接指向挂载的 /model 目录
+        trtllm-serve "/model" \
+          --max_batch_size 128 \
+          --trust_remote_code \
+          --port 8355 \
+          --extra_llm_api_options /tmp/extra-config.yml
 
   open-webui:
     image: ghcr.io/open-webui/open-webui:main
     container_name: open-webui
     restart: unless-stopped
-    depends_on:
-      llm-brain:
-        condition: service_healthy
+      #depends_on:
+      #  llm-brain:
+      #    condition: service_healthy
     ports:
       - "${OPEN_WEBUI_PORT}:8080"
     environment:
-      OPENAI_API_BASE_URLS: http://llm-brain:8000/v1
+      OPENAI_API_BASE_URLS: http://trtllm-server:8355/v1
       OPENAI_API_KEYS: sk-local-dummy-key
     volumes:
       - ${OPEN_WEBUI_DATA_DIR}:/app/backend/data
