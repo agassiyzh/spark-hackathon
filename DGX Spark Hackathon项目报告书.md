@@ -132,72 +132,13 @@
 
 ## 六、图示与证据材料（提交版建议）
 
-### 图1：系统架构图（可直接渲染）
 
-```mermaid
-flowchart TB
-    U[用户/老人/家属]
+#### 图2：设备接入与状态总览截图（Home Assistant）
 
-    subgraph DGX[NVIDIA DGX Spark 本地推理节点]
-        direction LR
-        UI[OpenClaw 对话界面]
-        AGENT[OpenClaw Agent]
-        VLLM[vLLM 推理服务\nOpenAI-compatible API]
-        LLM[Qwen 32B NVFP4]
-        UI --> AGENT
-        AGENT --> VLLM
-        VLLM <--> LLM
-        VLLM --> AGENT
-    end
+#### 图3：异常告警示例截图（风险等级 + 依据 + 建议）
 
-    subgraph HOME[家庭设备中枢（Home Assistant）]
-        direction LR
-        HAAPI[Home Assistant API]
-        HA[Home Assistant Core]
-        DEV[智能电器实体\n灯/空调/传感器/开关]
-        HIST[历史状态数据\n活动/用电/环境]
-        HAAPI --> HA
-        HA <--> DEV
-        HA --> HIST
-    end
+#### 图4：联动执行结果截图（动作回执/通知记录）
 
-    ANALYSIS[行为分析与风险判断]
-    WARN[安全告警与建议]
-    ACT[联动处置\n设备调整/关闭]
-    NOTICE[家属通知]
-
-    U -->|请求| UI
-    AGENT -->|控制| HAAPI
-    HIST -->|分析输入| ANALYSIS
-    AGENT -->|上下文| ANALYSIS
-    ANALYSIS -->|风险结论| WARN
-    WARN -->|执行| ACT
-    ACT -->|设备指令| HAAPI
-    WARN -->|通知| NOTICE
-
-    classDef user fill:#FFF4D6,stroke:#C89A2B,color:#1F2937,stroke-width:1.2px;
-    classDef ai fill:#E8F3FF,stroke:#2F78C4,color:#133A66,stroke-width:1.2px;
-    classDef home fill:#EAF8EE,stroke:#2F8F57,color:#184B2B,stroke-width:1.2px;
-    classDef logic fill:#F5F0FF,stroke:#6A56B3,color:#34206F,stroke-width:1.2px;
-    classDef alert fill:#FFEAEA,stroke:#C84A4A,color:#6D1717,stroke-width:1.2px;
-
-    class U user;
-    class UI,AGENT,VLLM,LLM ai;
-    class HAAPI,HA,DEV,HIST home;
-    class ANALYSIS logic;
-    class WARN,ACT,NOTICE alert;
-```
-
-图示要点：
-- 控制链路：`OpenClaw -> Qwen/vLLM -> Home Assistant API -> 设备`
-- 分析链路：`Home Assistant历史数据 -> 行为分析 -> 风险告警/建议`
-- 处置链路：`建议 -> 联动执行 -> 结果回传 + 家属通知`
-
-- 图2：设备接入与状态总览截图（Home Assistant）
-- 图3：异常告警示例截图（风险等级 + 依据 + 建议）
-- 图4：联动执行结果截图（动作回执/通知记录）
-
-建议在 CSDN/知乎/GitHub 发布版中至少保留图1与图3，以增强说服力。
 
 ## 七、团队贡献
 
