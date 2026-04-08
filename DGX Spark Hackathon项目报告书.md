@@ -3,7 +3,11 @@
 ## 一、项目概述
 
 ### 1.1 项目名称
-**SparkGuardian：基于 DGX Spark 的家庭 AI 管家（Qwen 32B NVFP4 + Home Assistant）**
+**Spark Home Brain**
+
+
+
+![](/photos/architecture_diagram.png)
 
 ### 1.2 项目目标
 在 `NVIDIA DGX Spark（GB10，128G Unified Memory）` 上，构建一个面向家庭场景的本地 AI 管家系统，实现：
