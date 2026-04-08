@@ -1,71 +1,119 @@
 services:
-  trtllm-server:
-    image: nvcr.io/nvidia/tensorrt-llm/release:1.3.0rc10
-    container_name: trtllm_llm_server
-    restart: unless-stopped
-    # 启用主机网络和 IPC 以最大化性能并减少节点通信开销
-    ipc: host
-    network_mode: host
-    # 显卡资源分配
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
-    # 解除系统资源限制 (防 OOM 保护)
-    ulimits:
-      memlock: -1
-      stack: 67108864
-    env_file:
-      - .env
-    environment:
-      # 为了在 shell 脚本中引用，这里依然把变量传递进容器
-      # - HF_TOKEN=${HF_TOKEN}
-      - MODEL_HANDLE=${MODEL_HANDLE}
-      - HTTP_PROXY=http://192.168.1.8:7890
-      - HTTPS_PROXY=http://192.168.1.8:7890
-    volumes:
-      # 映射本地缓存，防止每次重启容器都重新下载动辄几十GB的模型权重
-      #- ~/.cache/huggingface/:/root/.cache/huggingface/
-      - ${LOCAL_MODEL_PATH}:/model
-    # 将教程中的组合命令转化为标准的多行启动命令
-    command:
-      - bash
-      - -c
-      - |
-        # 1. 写入针对 Blackwell 优化的配置
-        cat > /tmp/extra-config.yml <<EOF
-        print_iter_log: false
-        kv_cache_config:
-          dtype: "auto"
-          # Blackwell 拥有 128GB 显存，可以留出 90% 给 KV Cache 以支持超长上下文
-          free_gpu_memory_fraction: 0.9
-        cuda_graph_config:
-          enable_padding: true
-        # 启用 FP8 相关的底层优化
-        disable_overlap_scheduler: true
-        EOF
+    nemotron-trtllm:
+        container_name: nemotron-trtllm
+        # 使用 Spark 官方指南中验证过的镜像版本
+        image:
+            nvcr.io/nvidia/tensorrt-llm/release:1.3.0rc10
+            #restart: unless-stopped
+        ports:
+            - "8355:8355"
+        # 【Spark 专属优化】：解除宿主机内存锁定限制与栈大小限制，防止加载 120B 权重时发生 OOM
+        ulimits:
+            memlock: -1
+            stack: 67108864
 
-        # 2. 启动服务，直接指向挂载的 /model 目录
-        trtllm-serve "/model" \
-          --max_batch_size 128 \
-          --trust_remote_code \
-          --port 8355 \
-          --extra_llm_api_options /tmp/extra-config.yml
+        # 开启共享内存与宿主机网络模式
+        #ipc: host
+        # network_mode: "host"
+        shm_size: "16gb"
 
-  open-webui:
-    image: ghcr.io/open-webui/open-webui:main
-    container_name: open-webui
-    restart: unless-stopped
-      #depends_on:
-      #  llm-brain:
-      #    condition: service_healthy
-    ports:
-      - "${OPEN_WEBUI_PORT}:8080"
-    environment:
-      OPENAI_API_BASE_URLS: http://trtllm-server:8355/v1
-      OPENAI_API_KEYS: sk-local-dummy-key
-    volumes:
-      - ${OPEN_WEBUI_DATA_DIR}:/app/backend/data
+        volumes:
+            # 挂载你的本地模型目录（确保此路径已下载好 Nemotron-3-Super 的模型文件）
+            - /home/xsuper/.cache/modelscope/hub/models/nv-community/NVIDIA-Nemotron-3-Super-120B-A12B-NVFP4:/models/nemotron:ro
+            # 挂载所需的额外配置文件
+            - ./extra-llm-api-config.yml:/tmp/extra-llm-api-config.yml:ro
+
+        command: >
+            bash -c '
+              # 在容器启动时自动合并基础环境的动态链接路径（官方安全机制保护）
+              TLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
+              trtllm-serve /models/nemotron
+              --max_batch_size 8 \
+              --port 8355 \
+              --tp_size 1 \
+              --ep_size 1 \
+              --trust_remote_code \
+              --port 8355 \
+              --reasoning_parser nano-v3 \
+              --tool_parser qwen3_coder \
+              --extra_llm_api_options /tmp/extra-llm-api-config.yml \
+              --max_seq_len 524288
+            '
+        deploy:
+            resources:
+                limits:
+                    memory: 115G
+                reservations:
+                    devices:
+                        - driver: nvidia
+                          count: all
+                          capabilities: [gpu]
+
+    llm-brain:
+        image: vllm/vllm-openai:gemma4-cu130
+        container_name: llm-brain
+        restart: unless-stopped
+        ports:
+            - "${VLLM_PORT}:8000"
+        environment:
+            HF_ENDPOINT:
+                ${HF_ENDPOINT}
+                #HTTP_PROXY: ${PROXY_URL}
+                #HTTPS_PROXY: ${PROXY_URL}
+            ALL_PROXY: ${PROXY_URL}
+            NO_PROXY: ${NO_PROXY}
+        volumes:
+            - ${HF_HOME}:/root/.cache/huggingface
+            - /home/xsuper/.cache/modelscope/hub/models:/models
+        healthcheck:
+            test:
+                - CMD-SHELL
+                - python3 -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health').read()"
+            interval: 30s
+            timeout: 10s
+            retries: 20
+            start_period: 180s
+        command:
+            - ${HF_MODEL_HANDLE}
+            - --host
+            - 0.0.0.0
+            - --port
+            - "8000"
+            - --max-model-len
+            - ${MAX_MODEL_LEN}
+            - --max-num-seqs
+            - ${MAX_NUM_SEQS}
+            - --tensor-parallel-size
+            - ${TENSOR_PARALLEL_SIZE}
+            - --gpu-memory-utilization
+            - ${GPU_MEMORY_UTILIZATION}
+            - --quantization
+            - fp8
+            - --kv-cache-dtype
+            - auto
+            - --enable-chunked-prefill
+            - --enable-auto-tool-choice
+            - --tool-call-parser
+            - hermes
+        deploy:
+            resources:
+                reservations:
+                    devices:
+                        - driver: nvidia
+                          count: all
+                          capabilities: [gpu]
+
+    open-webui:
+        image: ghcr.io/open-webui/open-webui:main
+        container_name: open-webui
+        restart: unless-stopped
+        depends_on:
+            llm-brain:
+                condition: service_healthy
+        ports:
+            - "${OPEN_WEBUI_PORT}:8080"
+        environment:
+            OPENAI_API_BASE_URLS: http://llm-brain:8000/v1
+            OPENAI_API_KEYS: sk-local-dummy-key
+        volumes:
+            - ${OPEN_WEBUI_DATA_DIR}:/app/backend/data
