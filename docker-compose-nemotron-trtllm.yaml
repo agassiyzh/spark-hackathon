@@ -1,0 +1,50 @@
+services:
+  nemotron-trtllm:
+    container_name: nemotron-trtllm
+    # 使用 Spark 官方指南中验证过的镜像版本
+    image:
+      nvcr.io/nvidia/tensorrt-llm/release:1.3.0rc10
+      #restart: unless-stopped
+    ports:
+      - "8355:8355"
+    # 【Spark 专属优化】：解除宿主机内存锁定限制与栈大小限制，防止加载 120B 权重时发生 OOM
+    ulimits:
+      memlock: -1
+      stack: 67108864
+
+    # 开启共享内存与宿主机网络模式
+    #ipc: host
+    # network_mode: "host"
+    shm_size: "16gb"
+
+    volumes:
+      # 挂载你的本地模型目录（确保此路径已下载好 Nemotron-3-Super 的模型文件）
+      - /home/xsuper/.cache/modelscope/hub/models/nv-community/NVIDIA-Nemotron-3-Super-120B-A12B-NVFP4:/models/nemotron:ro
+      # 挂载所需的额外配置文件
+      - ./extra-llm-api-config.yml:/tmp/extra-llm-api-config.yml:ro
+
+    command: >
+      bash -c '
+        # 在容器启动时自动合并基础环境的动态链接路径（官方安全机制保护）
+        TLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
+        trtllm-serve /models/nemotron
+        --max_batch_size 8 \
+        --port 8355 \
+        --tp_size 1 \
+        --ep_size 1 \
+        --trust_remote_code \
+        --port 8355 \
+        --reasoning_parser nano-v3 \
+        --tool_parser qwen3_coder \
+        --extra_llm_api_options /tmp/extra-llm-api-config.yml \
+        --max_seq_len 524288
+      '
+    deploy:
+      resources:
+        limits:
+          memory: 115G
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]

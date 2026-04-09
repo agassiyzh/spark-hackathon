@@ -1,21 +1,19 @@
 services:
-  llm-brain:
+  llm-brain-gemma4:
     image: vllm/vllm-openai:gemma4-cu130
-    container_name: llm-brain
+    container_name: llm-brain-gemma4
     # restart: unless-stopped
     ports:
-      - "${VLLM_PORT}:8000"
+      - "8001:8000"
     environment:
       HF_ENDPOINT:
         ${HF_ENDPOINT}
         #HTTP_PROXY: ${PROXY_URL}
         #HTTPS_PROXY: ${PROXY_URL}
-      ALL_PROXY: ${PROXY_URL}
-      NO_PROXY: ${NO_PROXY}
+      # ALL_PROXY: ${PROXY_URL}
+      # NO_PROXY: ${NO_PROXY}
     volumes:
       - ${HF_HOME}:/root/.cache/huggingface
-      - /home/xsuper/.cache/modelscope/hub/models:/models
-      - ./chat_template.jinja:/tmp/chat_template.jinja:ro
     healthcheck:
       test:
         - CMD-SHELL
@@ -25,7 +23,7 @@ services:
       retries: 20
       start_period: 180s
     command:
-      - ${HF_MODEL_HANDLE}
+      - google/gemma-4-26B-A4B-it
       - --host
       - 0.0.0.0
       - --port
@@ -38,18 +36,12 @@ services:
       - ${TENSOR_PARALLEL_SIZE}
       - --gpu-memory-utilization
       - ${GPU_MEMORY_UTILIZATION}
-      - --quantization
-      - fp8
-      - --kv-cache-dtype
-      - auto
       - --enable-chunked-prefill
       - --enable-auto-tool-choice
       - --tool-call-parser
-      - qwen3_xml
+      - gemma4
       - --served-model-name
-      - qwen-3.5-35b
-      # - --chat-template
-      # - /tmp/chat_template.jinja
+      - gemma4-26b
     deploy:
       resources:
         reservations:
@@ -57,19 +49,3 @@ services:
             - driver: nvidia
               count: all
               capabilities: [gpu]
-
-  open-webui:
-    image: ghcr.io/open-webui/open-webui:main
-    container_name: open-webui
-    restart: unless-stopped
-    depends_on:
-      llm-brain:
-        condition: service_healthy
-    ports:
-      - "${OPEN_WEBUI_PORT}:8080"
-    environment:
-      OPENAI_API_BASE_URLS: http://llm-brain:8000/v1
-      OPENAI_API_KEYS: sk-local-dummy-key
-      ENABLE_API_KEYS: true
-    volumes:
-      - ${OPEN_WEBUI_DATA_DIR}:/app/backend/data
